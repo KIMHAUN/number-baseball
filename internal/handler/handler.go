@@ -72,6 +72,16 @@ func (h *Handler) WebSocket(c *gin.Context) {
 		}
 
 		switch msg.Type {
+		case "set_secret":
+			sess, idx := h.Matcher.GetSession(userID)
+			if sess == nil {
+				continue
+			}
+			payloadBytes, _ := json.Marshal(msg.Payload)
+			var req model.GuessRequest
+			json.Unmarshal(payloadBytes, &req)
+			sess.SubmitSecret(idx, req.Guess)
+
 		case "guess":
 			sess, idx := h.Matcher.GetSession(userID)
 			if sess == nil {

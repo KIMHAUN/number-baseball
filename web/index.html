@@ -64,6 +64,11 @@
 
   <div class="turn-indicator" id="turnIndicator" style="display:none;"></div>
 
+  <div class="guess-box" id="secretBox" style="display:none;">
+    <div class="digit-inputs" id="secretInputs"></div>
+    <button class="btn btn-primary" id="secretBtn" onclick="submitSecret()">비밀 숫자 설정</button>
+  </div>
+
   <div class="guess-box" id="guessBox" style="display:none;">
     <div class="digit-inputs" id="digitInputs"></div>
     <button class="btn btn-primary" id="guessBtn" onclick="submitGuess()" disabled>제출</button>
@@ -115,10 +120,19 @@ function connect() {
 
 function handleMessage(msg) {
   switch (msg.type) {
+    case 'set_secret':
+      digits = msg.payload.config.digits || 3;
+      setStatus(`매칭 완료! 비밀 숫자를 설정하세요 (${digits}자리)`, 'playing');
+      addLog(`🎮 매칭 완료! ${digits}자리 비밀 숫자를 설정하세요`, 'system');
+      buildSecretInputs();
+      $('secretBox').style.display = 'flex';
+      break;
+
     case 'game_start':
       digits = msg.payload.config.digits || 3;
       setStatus(`게임 시작! (${digits}자리)`, 'playing');
-      addLog(`🎮 매칭 완료! ${digits}자리 숫자 야구 시작`, 'system');
+      addLog('✅ 양쪽 모두 설정 완료! 게임 시작', 'system');
+      $('secretBox').style.display = 'none';
       buildDigitInputs();
       $('guessBox').style.display = 'flex';
       break;
@@ -208,6 +222,53 @@ function reconnect() {
     <button class="btn btn-primary" id="connectBtn" onclick="connect()">접속</button>
   `;
   connect();
+}
+
+function buildSecretInputs() {
+  const container = $('secretInputs');
+  container.innerHTML = '';
+  for (let i = 0; i < digits; i++) {
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.maxLength = 1;
+    inp.className = 'digit-input';
+    inp.inputMode = 'numeric';
+    inp.addEventListener('input', (e) => {
+      e.target.value = e.target.value.replace(/[^0-9]/g, '');
+      if (e.target.value) {
+        e.target.classList.add('filled');
+        const next = e.target.nextElementSibling;
+        if (next) next.focus();
+      }
+    });
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Backspace' && !e.target.value) {
+        e.target.classList.remove('filled');
+        const prev = e.target.previousElementSibling;
+        if (prev) prev.focus();
+      }
+      if (e.key === 'Enter') submitSecret();
+    });
+    container.appendChild(inp);
+  }
+  container.querySelector('input').focus();
+}
+
+function submitSecret() {
+  const inputs = $('secretInputs').querySelectorAll('.digit-input');
+  let secret = '';
+  for (const inp of inputs) {
+    if (!inp.value) return;
+    secret += inp.value;
+  }
+  if (new Set(secret).size !== digits) {
+    addLog('⚠️ 중복된 숫자는 안 됩니다!', 'system');
+    return;
+  }
+  ws.send(JSON.stringify({ type: 'set_secret', payload: { guess: secret } }));
+  $('secretBox').style.display = 'none';
+  setStatus('상대방 설정 대기 중...', 'playing');
+  addLog(`🔒 비밀 숫자 설정 완료! 상대를 기다리는 중...`, 'system');
 }
 
 function buildDigitInputs() {

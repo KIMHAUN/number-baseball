@@ -37,14 +37,12 @@ type Session struct {
 	TurnCount int
 	StartedAt time.Time
 	guessCh   [2]chan string
+	secretCh  [2]chan string
 	done      chan model.GameOverPayload
 	mu        sync.RWMutex
 }
 
 func NewSession(p1, p2 *Player, cfg model.GameConfig) *Session {
-	p1.Secret = generateSecret(cfg.Digits)
-	p2.Secret = generateSecret(cfg.Digits)
-
 	s := &Session{
 		ID:        uuid.New().String(),
 		Players:   [2]*Player{p1, p2},
@@ -56,21 +54,48 @@ func NewSession(p1, p2 *Player, cfg model.GameConfig) *Session {
 	}
 	s.guessCh[0] = make(chan string, 1)
 	s.guessCh[1] = make(chan string, 1)
+	s.secretCh[0] = make(chan string, 1)
+	s.secretCh[1] = make(chan string, 1)
 	return s
 }
 
+// 비밀 숫자 설정
+func (s *Session) SubmitSecret(playerIdx int, secret string) {
+	select {
+	case s.secretCh[playerIdx] <- secret:
+	default:
+	}
+}
+
 func (s *Session) Run() model.GameOverPayload {
+	// 양쪽에 비밀 숫자 입력 요청
+	for i := 0; i < 2; i++ {
+		s.Players[i].Send(model.WSMessage{Type: "set_secret", Payload: map[string]any{
+			"session_id": s.ID,
+			"config":     s.Config,
+			"your_index": i,
+		}})
+	}
+
+	// 양쪽 비밀 숫자 수신 대기 (60초 타임아웃)
+	for i := 0; i < 2; i++ {
+		select {
+		case secret := <-s.secretCh[i]:
+			s.Players[i].Secret = secret
+		case <-time.After(60 * time.Second):
+			opponent := 1 - i
+			return s.endGame(s.Players[opponent].ID, s.Players[i].ID, "timeout_secret")
+		}
+	}
+
 	// 게임 시작 알림
-	s.broadcast(model.WSMessage{Type: "game_start", Payload: map[string]any{
-		"session_id": s.ID,
-		"config":     s.Config,
-		"your_index": 0,
-	}}, 0)
-	s.broadcast(model.WSMessage{Type: "game_start", Payload: map[string]any{
-		"session_id": s.ID,
-		"config":     s.Config,
-		"your_index": 1,
-	}}, 1)
+	for i := 0; i < 2; i++ {
+		s.Players[i].Send(model.WSMessage{Type: "game_start", Payload: map[string]any{
+			"session_id": s.ID,
+			"config":     s.Config,
+			"your_index": i,
+		}})
+	}
 
 	for s.TurnCount < s.Config.MaxTurns*2 {
 		current := s.Turn
